@@ -377,6 +377,25 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
 }
 .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
+
+/* Supabase owner controls */
+.auth-area{display:flex;align-items:center;gap:10px;margin-left:14px}
+.auth-btn{border:1px solid rgba(224,188,126,.45);background:transparent;color:var(--parchment-soft);padding:8px 13px;border-radius:999px;font:600 12px Manrope,sans-serif;cursor:pointer}
+.auth-btn:hover{background:rgba(224,188,126,.12)}
+.auth-status{font-size:11px;color:var(--gold);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.owner-only{display:none}
+.login-overlay{position:fixed;inset:0;background:rgba(24,14,10,.78);z-index:500;align-items:center;justify-content:center;padding:20px}
+.login-overlay.open{display:flex}
+.login-card{width:min(430px,100%);background:var(--parchment);color:var(--espresso);padding:32px;border-radius:10px;box-shadow:0 25px 80px rgba(0,0,0,.45)}
+.login-card h3{font-family:Fraunces,serif;font-size:30px;margin:0 0 8px}
+.login-card p{font-size:13px;line-height:1.6;margin:0 0 22px;color:#695447}
+.login-card label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin:14px 0 7px}
+.login-card input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #cdbba7;border-radius:5px;background:#fffaf3;color:var(--espresso)}
+.login-actions{display:flex;gap:10px;align-items:center;margin-top:20px}
+.login-actions .btn{cursor:pointer}
+.login-error{font-size:12px;color:#9d2f2f;margin-top:12px;min-height:16px}
+.login-close{float:right;border:0;background:transparent;font-size:25px;cursor:pointer;color:#6a5142}
+
 </style>
 </head>
 <body>
@@ -386,8 +405,12 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
   <div class="nav-links">
     <a href="#top">Welcome</a>
     <a href="#shelf">Bookshelf</a>
-    <a href="#add">Add a book</a>
+    <a href="#add" class="owner-only">Add a book</a>
     <a href="#corner">My corner</a>
+    <div class="auth-area">
+      <span class="auth-status" id="authStatus">Public view</span>
+      <button class="auth-btn" id="authBtn" type="button">Owner login</button>
+    </div>
   </div>
 </nav>
 
@@ -426,7 +449,7 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
   </div>
 </section>
 
-<section class="add-section" id="add">
+<section class="add-section owner-only" id="add">
   <div class="section-head">
     <p class="kicker">Next up</p>
     <h2>Add a new book</h2>
@@ -545,8 +568,28 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
   </div>
 </div>
 
+
+<div class="login-overlay" id="loginOverlay" style="display:none">
+  <div class="login-card">
+    <button class="login-close" id="loginClose" type="button" aria-label="Close">&times;</button>
+    <h3>Owner login</h3>
+    <p>Visitors can browse the library. Sign in here to add, rate, edit notes, or remove books.</p>
+    <form id="loginForm">
+      <label for="loginEmail">Email</label>
+      <input id="loginEmail" type="email" autocomplete="username" required>
+      <label for="loginPassword">Password</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+      <div class="login-actions">
+        <button class="btn" type="submit">Sign in</button>
+        <span class="login-error" id="loginError"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const STORAGE_KEY = 'harsha-library-books';
 const PALETTE = [
@@ -624,22 +667,133 @@ const BUBBLE_LINES = [
   "Hot, dark, and exactly on time."
 ];
 
-const storageAdapter = {
-  async get(key){
-    if(window.storage && typeof window.storage.get === 'function'){
-      return await window.storage.get(key, false);
+
+const SUPABASE_URL = 'https://yowxqhxdtqamnxxrdrua.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_GxRAhVd_ZYbeZZp30j5tUQ_MaH7RmYn';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+
+let currentSession = null;
+let isOwnerSignedIn = false;
+
+function isOwner(){
+  return !!currentSession && currentSession.user;
+}
+
+async function loadBooks(){
+  try{
+    const { data, error } = await supabaseClient
+      .from('books')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if(error) throw error;
+
+    if(data && data.length){
+      books = data.map(b => ({
+        id: b.id,
+        title: b.title || '',
+        author: b.author || '',
+        rating: Number(b.rating || 0),
+        notes: b.notes || '',
+        color: Number(b.color || 0),
+        cover: b.cover || null
+      }));
+      return;
     }
-    const v = localStorage.getItem(key);
-    return v ? { key, value: v } : null;
-  },
-  async set(key, value){
-    if(window.storage && typeof window.storage.set === 'function'){
-      return await window.storage.set(key, value, false);
+
+    // Keep the original shelf visible for everyone until the owner signs in.
+    books = buildSeedBooks();
+
+    // Only the authenticated owner may create the initial shared copy.
+    if(isOwner()){
+      await seedSharedLibrary();
     }
-    localStorage.setItem(key, value);
-    return { key, value };
+  }catch(e){
+    console.error('Could not load library from Supabase:', e);
+    // Graceful fallback keeps the original page usable if the network is unavailable.
+    books = buildSeedBooks();
+    try{
+      const local = localStorage.getItem(STORAGE_KEY);
+      if(local) books = JSON.parse(local);
+    }catch(_){}
   }
-};
+}
+
+async function seedSharedLibrary(){
+  try{
+    const local = localStorage.getItem(STORAGE_KEY);
+    let seedBooks = buildSeedBooks();
+
+    // If this browser already contains additions, preserve them during migration.
+    if(local){
+      try{
+        const parsed = JSON.parse(local);
+        if(Array.isArray(parsed) && parsed.length) seedBooks = parsed;
+      }catch(_){}
+    }
+
+    const rows = seedBooks.map(b => ({
+      id: b.id,
+      title: b.title,
+      author: b.author || '',
+      rating: Number(b.rating || 0),
+      notes: b.notes || '',
+      color: Number(b.color || 0),
+      cover: b.cover || null
+    }));
+
+    const { error } = await supabaseClient.from('books').upsert(rows, { onConflict:'id' });
+    if(error) throw error;
+
+    books = seedBooks;
+  }catch(e){
+    console.error('Initial library migration failed:', e);
+  }
+}
+
+async function saveBook(book){
+  if(!isOwner()) throw new Error('Owner login required.');
+  const { error } = await supabaseClient.from('books').upsert({
+    id: book.id,
+    title: book.title,
+    author: book.author || '',
+    rating: Number(book.rating || 0),
+    notes: book.notes || '',
+    color: Number(book.color || 0),
+    cover: book.cover || null
+  }, { onConflict:'id' });
+  if(error) throw error;
+}
+
+async function deleteBook(id){
+  if(!isOwner()) throw new Error('Owner login required.');
+  const { error } = await supabaseClient.from('books').delete().eq('id', id);
+  if(error) throw error;
+}
+
+function setOwnerUI(signedIn){
+  isOwnerSignedIn = signedIn;
+  document.querySelectorAll('.owner-only').forEach(el => {
+    el.style.display = signedIn ? '' : 'none';
+  });
+
+  const status = document.getElementById('authStatus');
+  const btn = document.getElementById('authBtn');
+  if(signedIn){
+    status.textContent = currentSession?.user?.email || 'Owner';
+    btn.textContent = 'Log out';
+  }else{
+    status.textContent = 'Public view';
+    btn.textContent = 'Owner login';
+  }
+
+  const notes = document.getElementById('modalNotes');
+  if(notes){
+    notes.readOnly = !signedIn;
+    notes.style.opacity = signedIn ? '1' : '.78';
+  }
+}
+
 
 let books = [];
 let activeId = null;
@@ -784,6 +938,7 @@ function openModal(id){
   document.getElementById('modalNotes').value = book.notes || '';
   renderModalStars(book.rating);
   document.getElementById('saveHint').textContent = '';
+  document.getElementById('modalDelete').style.display = isOwnerSignedIn ? '' : 'none';
   document.getElementById('modalOverlay').classList.add('open');
 }
 
@@ -800,13 +955,20 @@ function renderModalStars(rating){
     s.className = 'star' + (i <= rating ? ' filled' : '');
     s.textContent = '\u2605';
     s.addEventListener('click', async () => {
+      if(!isOwner()) return;
       const book = books.find(b => b.id === activeId);
       if(!book) return;
+      if(!isOwner()) return;
       book.rating = i;
       renderModalStars(i);
-      await persist();
-      renderShelf();
-      flashSaved();
+      try{
+        await saveBook(book);
+        renderShelf();
+        flashSaved();
+      }catch(err){
+        showToast('Could not save rating');
+        console.error(err);
+      }
     });
     wrap.appendChild(s);
   }
@@ -855,24 +1017,37 @@ function initEvents(){
   });
 
   document.getElementById('modalNotes').addEventListener('input', (e) => {
+    if(!isOwner()) return;
     const book = books.find(b => b.id === activeId);
     if(!book) return;
     book.notes = e.target.value;
     clearTimeout(notesTimer);
     notesTimer = setTimeout(async () => {
-      await persist();
-      renderStats();
-      flashSaved();
+      try{
+        await saveBook(book);
+        renderStats();
+        flashSaved();
+      }catch(err){
+        showToast('Could not save notes');
+        console.error(err);
+      }
     }, 500);
   });
 
+  document.getElementById('modalDelete').style.display = isOwnerSignedIn ? '' : 'none';
   document.getElementById('modalDelete').addEventListener('click', async () => {
-    if(!activeId) return;
-    books = books.filter(b => b.id !== activeId);
-    await persist();
-    renderShelf();
-    closeModal();
-    showToast('Removed from your shelf');
+    if(!activeId || !isOwner()) return;
+    const id = activeId;
+    try{
+      await deleteBook(id);
+      books = books.filter(b => b.id !== id);
+      renderShelf();
+      closeModal();
+      showToast('Removed from your shelf');
+    }catch(err){
+      showToast('Could not remove this book');
+      console.error(err);
+    }
   });
 
   document.getElementById('addForm').addEventListener('submit', async (e) => {
@@ -896,9 +1071,20 @@ function initEvents(){
       color: books.length % PALETTE.length,
       cover: null
     };
-    books.push(newBook);
-    await persist();
-    renderShelf();
+    if(!isOwner()){
+      showToast('Please sign in as the owner first');
+      return;
+    }
+
+    try{
+      await saveBook(newBook);
+      books.push(newBook);
+      renderShelf();
+    }catch(err){
+      showToast('Could not add this book');
+      console.error(err);
+      return;
+    }
 
     document.getElementById('addForm').reset();
     document.getElementById('ratingPicker').dataset.rating = 0;
@@ -930,9 +1116,79 @@ function initEvents(){
   });
 }
 
+
+function openLogin(){
+  const overlay = document.getElementById('loginOverlay');
+  overlay.style.display = 'flex';
+  setTimeout(() => document.getElementById('loginEmail').focus(), 50);
+}
+function closeLogin(){
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('loginError').textContent = '';
+}
+
+async function handleAuthState(session){
+  currentSession = session;
+  setOwnerUI(!!session);
+
+  if(session){
+    // If the database is empty, seed it once after the owner logs in.
+    const { data, error } = await supabaseClient.from('books').select('id').limit(1);
+    if(!error && (!data || data.length === 0)){
+      await seedSharedLibrary();
+      renderShelf();
+    }else{
+      await loadBooks();
+      renderShelf();
+    }
+  }
+}
+
+function initAuth(){
+  document.getElementById('authBtn').addEventListener('click', async () => {
+    if(currentSession){
+      await supabaseClient.auth.signOut();
+    }else{
+      openLogin();
+    }
+  });
+
+  document.getElementById('loginClose').addEventListener('click', closeLogin);
+  document.getElementById('loginOverlay').addEventListener('click', (e) => {
+    if(e.target.id === 'loginOverlay') closeLogin();
+  });
+
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errorEl = document.getElementById('loginError');
+    errorEl.textContent = 'Signing in…';
+
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if(error){
+      errorEl.textContent = error.message || 'Sign in failed.';
+      return;
+    }
+
+    closeLogin();
+    showToast('Welcome back');
+  });
+
+  supabaseClient.auth.onAuthStateChange((_event, session) => {
+    handleAuthState(session);
+  });
+}
+
 (async function init(){
   initRatingPicker();
   initEvents();
+  initAuth();
+
+  const { data } = await supabaseClient.auth.getSession();
+  currentSession = data.session;
+  setOwnerUI(!!currentSession);
+
   await loadBooks();
   renderShelf();
 })();
