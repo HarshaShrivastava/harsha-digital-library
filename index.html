@@ -405,7 +405,7 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
   <div class="nav-links">
     <a href="#top">Welcome</a>
     <a href="#shelf">Bookshelf</a>
-    <a href="#add" class="owner-only">Add a book</a>
+    <a href="#add">Add a book</a>
     <a href="#corner">My corner</a>
     <div class="auth-area">
       <span class="auth-status" id="authStatus">Public view</span>
@@ -449,7 +449,19 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
   </div>
 </section>
 
-<section class="add-section owner-only" id="add">
+<section class="add-section" id="add">
+  <div id="ownerPrompt" style="
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border: 1px solid rgba(224,188,126,.35);
+  border-radius: 6px;
+  background: rgba(255,255,255,.05);
+  font-size: 13px;
+  line-height: 1.5;
+">
+  <strong>Owner access:</strong>
+  Please log in using the <em>Owner Login</em> button above to add, edit, or delete books.
+</div>
   <div class="section-head">
     <p class="kicker">Next up</p>
     <h2>Add a new book</h2>
