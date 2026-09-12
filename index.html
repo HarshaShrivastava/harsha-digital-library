@@ -730,8 +730,16 @@ async function loadBooks(){   try{     const { data, error } = await supabaseCli
     }catch(_){}
   }
 }
+async function persist(){
+  try{
+    await storageAdapter.set(STORAGE_KEY, JSON.stringify(books));
+  }catch(e){
+    console.error('Could not save library', e);
+  }
+}
 
-async function seedSharedLibrary(){
+                           
+  async function seedSharedLibrary(){
   try{
     const local = localStorage.getItem(STORAGE_KEY);
     let seedBooks = buildSeedBooks();
