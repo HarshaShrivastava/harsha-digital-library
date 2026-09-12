@@ -826,44 +826,6 @@ function buildSeedBooks(){
     cover: COVER_IMAGES[i] || null
   }));
 }
-
-async function loadBooks(){
-  try{
-    const res = await storageAdapter.get(STORAGE_KEY);
-    if(res && res.value){
-      books = JSON.parse(res.value);
-      let changed = false;
-      books.forEach(book => {
-        if(!book.cover && book.id && book.id.indexOf('seed-') === 0){
-          const idx = parseInt(book.id.slice(5), 10);
-          if(COVER_IMAGES[idx]){
-            book.cover = COVER_IMAGES[idx];
-            changed = true;
-          }
-        }
-      });
-      if(changed) await persist();
-      return;
-    }
-  }catch(e){}
-  books = buildSeedBooks();
-  await persist();
-}
-
-async function persist(){
-  try{
-    await storageAdapter.set(STORAGE_KEY, JSON.stringify(books));
-  }catch(e){
-    console.error('Could not save library', e);
-  }
-}
-
-function escapeHtml(s){
-  const d = document.createElement('div');
-  d.innerText = s;
-  return d.innerHTML;
-}
-
 function renderStats(){
   document.getElementById('stat-books').textContent = books.length;
   const rated = books.filter(b => b.rating > 0).length;
