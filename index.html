@@ -691,7 +691,7 @@ function isOwner(){
   return !!currentSession && currentSession.user;
 }
 
-async function loadBooks(){
+async function loadBooks(){   try{     const { data, error } = await supabaseClient       .from('books')       .select('*')       .order('created_at', { ascending: true });      if(error) throw error;      if(data && data.length){       books = data.map(b => ({         id: b.id,         title: b.title || '',         author: b.author || '',         rating: Number(b.rating || 0),         notes: b.notes || '',         color: Number(b.color || 0),         cover: b.cover || null       }));        return;     }      // If Supabase is empty, show the original bookshelf     books = buildSeedBooks();    }catch(e){     console.error('Could not load library from Supabase:', e);      // If Supabase cannot be reached, show the original bookshelf     books = buildSeedBooks();   } }
   try{
     const { data, error } = await supabaseClient
       .from('books')
