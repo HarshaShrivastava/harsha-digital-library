@@ -480,6 +480,10 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
         <label for="fAuthor">Author</label>
         <input type="text" id="fAuthor" placeholder="e.g. Markus Zusak" autocomplete="off">
       </div>
+      <div class="form-row">
+        <label for="fCover">Cover image URL (optional)</label>
+        <input type="url" id="fCover" placeholder="https://example.com/cover.jpg" autocomplete="off">
+      </div>
       <div class="form-two">
         <div class="form-row">
           <label>Your rating</label>
@@ -1044,13 +1048,14 @@ function initEvents(){
     errorEl.classList.remove('show');
     const author = document.getElementById('fAuthor').value.trim();
     const notes = document.getElementById('fNotes').value.trim();
+    const cover = document.getElementById('fCover').value.trim();
     const rating = parseInt(document.getElementById('ratingPicker').dataset.rating || '0', 10);
 
     const newBook = {
       id: 'book-' + Date.now(),
       title, author, rating, notes,
       color: books.length % PALETTE.length,
-      cover: null
+      cover: cover || null
     };
     if(!isOwner()){
       showToast('Please sign in as the owner first');
