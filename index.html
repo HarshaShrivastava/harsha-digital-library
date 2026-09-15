@@ -361,6 +361,29 @@ section{ position:relative; padding:100px 24px; }
 .form-error.show{ display:block; }
 .add-submit{ width:100%; padding:14px; margin-top:6px; }
 
+/* ---------- SHELF TOGGLE (add form) ---------- */
+.shelf-toggle{ display:flex; gap:10px; }
+.shelf-toggle-btn{
+  flex:1; padding:12px 10px; border-radius:6px; border:1.5px solid #d8c9a8;
+  background:#fff; color:var(--ink); font-family:var(--font-body); font-weight:700;
+  font-size:13px; cursor:pointer; transition:all .18s ease;
+}
+.shelf-toggle-btn:hover{ border-color:var(--brass); }
+.shelf-toggle-btn.active{
+  background:var(--espresso); border-color:var(--espresso); color:var(--parchment-soft);
+}
+
+/* ---------- TBR SECTION HEAD ---------- */
+.tbr-head{ margin-top:70px; }
+
+/* ---------- MODAL SHELF MOVE BUTTON ---------- */
+.modal-shelf-btn{
+  background:transparent; border:1px solid var(--walnut-light); color:var(--walnut);
+  padding:9px 16px; border-radius:5px; font-size:12px; font-weight:700; cursor:pointer;
+  font-family:var(--font-body); letter-spacing:0.2px; transition:opacity .15s ease;
+}
+.modal-shelf-btn:hover{ opacity:0.75; }
+
 /* ---------- FOOTER ---------- */
 footer{
   padding:50px 24px; text-align:center; background:var(--espresso-2);
@@ -440,12 +463,21 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
 
 <section class="shelf-section" id="shelf">
   <div class="section-head">
-    <p class="kicker">Twenty-five stories and counting</p>
+    <p class="kicker" id="readKicker">Twenty-five stories and counting</p>
     <h2>The bookshelf</h2>
     <p>Every spine here is a book I've actually finished. Click one to rate it or leave yourself a note — future you will thank present you.</p>
   </div>
   <div class="shelf-frame" id="shelfFrame">
     <div class="shelf-empty">Loading your shelf…</div>
+  </div>
+
+  <div class="section-head tbr-head">
+    <p class="kicker" id="tbrKicker">Waiting patiently</p>
+    <h2>To be read</h2>
+    <p>Books already on the shelf, not opened yet. Click one to jot a note, or move it over once you've finished it.</p>
+  </div>
+  <div class="shelf-frame" id="tbrFrame">
+    <div class="shelf-empty">Your TBR pile is empty.</div>
   </div>
 </section>
 
@@ -494,7 +526,14 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
         <label for="fNotes">Notes</label>
         <textarea id="fNotes" rows="3" placeholder="A line, a quote, a feeling it left you with…" style="width:100%; padding:11px 13px; border:1px solid #d8c9a8; border-radius:6px; font-family:var(--font-body); font-size:14px; background:#fff; color:var(--ink); resize:vertical;"></textarea>
       </div>
-      <button type="submit" class="btn btn-primary add-submit">Add to shelf</button>
+      <div class="form-row">
+        <label>Where does it go?</label>
+        <div class="shelf-toggle" id="shelfToggle" data-shelf="read">
+          <button type="button" class="shelf-toggle-btn active" data-value="read">📚 Already read</button>
+          <button type="button" class="shelf-toggle-btn" data-value="tbr">🔖 To be read</button>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary add-submit" id="addSubmitBtn">Add to shelf</button>
     </form>
   </div>
 </section>
@@ -578,7 +617,10 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
     <span class="modal-label">Notes</span>
     <textarea id="modalNotes" placeholder="What did you think? Any lines worth remembering?"></textarea>
     <div class="modal-actions">
-      <button class="btn btn-danger" id="modalDelete">Remove book</button>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn btn-danger" id="modalDelete">Remove book</button>
+        <button class="modal-shelf-btn" id="modalShelfBtn">Move to TBR</button>
+      </div>
       <span class="save-hint" id="saveHint"></span>
     </div>
   </div>
@@ -712,7 +754,8 @@ async function loadBooks(){
         rating: Number(b.rating || 0),
         notes: b.notes || '',
         color: Number(b.color || 0),
-        cover: b.cover || null
+        cover: b.cover || null,
+        shelf: b.shelf === 'tbr' ? 'tbr' : 'read'
       }));
       return;
     }
@@ -755,7 +798,8 @@ async function seedSharedLibrary(){
       rating: Number(b.rating || 0),
       notes: b.notes || '',
       color: Number(b.color || 0),
-      cover: b.cover || null
+      cover: b.cover || null,
+      shelf: b.shelf === 'tbr' ? 'tbr' : 'read'
     }));
 
     const { error } = await supabaseClient.from('books').upsert(rows, { onConflict:'id' });
@@ -776,7 +820,8 @@ async function saveBook(book){
     rating: Number(book.rating || 0),
     notes: book.notes || '',
     color: Number(book.color || 0),
-    cover: book.cover || null
+    cover: book.cover || null,
+    shelf: book.shelf === 'tbr' ? 'tbr' : 'read'
   }, { onConflict:'id' });
   if(error) throw error;
 }
@@ -827,7 +872,8 @@ function buildSeedBooks(){
     rating: 0,
     notes: '',
     color: i % PALETTE.length,
-    cover: COVER_IMAGES[i] || null
+    cover: COVER_IMAGES[i] || null,
+    shelf: 'read'
   }));
 }
 
@@ -838,23 +884,61 @@ function escapeHtml(s){
 }
 
 function renderStats(){
-  document.getElementById('stat-books').textContent = books.length;
-  const rated = books.filter(b => b.rating > 0).length;
+  const readBooks = books.filter(b => b.shelf !== 'tbr');
+  const tbrBooks = books.filter(b => b.shelf === 'tbr');
+  document.getElementById('stat-books').textContent = readBooks.length;
+  const rated = readBooks.filter(b => b.rating > 0).length;
   document.getElementById('stat-rated').textContent = rated;
-  const authors = new Set(books.map(b => (b.author||'').trim().toLowerCase()).filter(Boolean));
+  const authors = new Set(readBooks.map(b => (b.author||'').trim().toLowerCase()).filter(Boolean));
   document.getElementById('stat-authors').textContent = authors.size;
+
+  const readKicker = document.getElementById('readKicker');
+  if(readKicker) readKicker.textContent = readBooks.length + (readBooks.length === 1 ? ' story and counting' : ' stories and counting');
+  const tbrKicker = document.getElementById('tbrKicker');
+  if(tbrKicker) tbrKicker.textContent = tbrBooks.length + (tbrBooks.length === 1 ? ' book waiting' : ' books waiting');
 }
 
-function renderShelf(){
-  const frame = document.getElementById('shelfFrame');
+function setShelfToggle(value){
+  const toggle = document.getElementById('shelfToggle');
+  if(!toggle) return;
+  toggle.dataset.shelf = value;
+  Array.from(toggle.children).forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === value);
+  });
+}
+
+function renderShelfInto(frameId, list, emptyMsg, shelfValue){
+  const frame = document.getElementById(frameId);
   frame.innerHTML = '';
-  if(books.length === 0){
-    frame.innerHTML = '<div class="shelf-empty">Your shelf is empty. Add the first book below.</div>';
+  if(list.length === 0){
+    const empty = document.createElement('div');
+    empty.className = 'shelf-empty';
+    empty.textContent = emptyMsg;
+    frame.appendChild(empty);
+    const row = document.createElement('div');
+    row.className = 'shelf-row';
+    const booksRow = document.createElement('div');
+    booksRow.className = 'books-row';
+    const addBtn = document.createElement('div');
+    addBtn.className = 'add-spine';
+    addBtn.title = 'Add a new book';
+    addBtn.textContent = '+';
+    addBtn.addEventListener('click', () => {
+      setShelfToggle(shelfValue);
+      document.getElementById('add').scrollIntoView({behavior:'smooth'});
+      setTimeout(() => document.getElementById('fTitle').focus(), 500);
+    });
+    booksRow.appendChild(addBtn);
+    const board = document.createElement('div');
+    board.className = 'shelf-board';
+    row.appendChild(booksRow);
+    row.appendChild(board);
+    frame.appendChild(row);
     return;
   }
   const PER_ROW = 5;
-  for(let i = 0; i < books.length; i += PER_ROW){
-    const rowBooks = books.slice(i, i + PER_ROW);
+  for(let i = 0; i < list.length; i += PER_ROW){
+    const rowBooks = list.slice(i, i + PER_ROW);
     const row = document.createElement('div');
     row.className = 'shelf-row';
 
@@ -884,12 +968,13 @@ function renderShelf(){
       booksRow.appendChild(spine);
     });
 
-    if(i + PER_ROW >= books.length){
+    if(i + PER_ROW >= list.length){
       const addBtn = document.createElement('div');
       addBtn.className = 'add-spine';
       addBtn.title = 'Add a new book';
       addBtn.textContent = '+';
       addBtn.addEventListener('click', () => {
+        setShelfToggle(shelfValue);
         document.getElementById('add').scrollIntoView({behavior:'smooth'});
         setTimeout(() => document.getElementById('fTitle').focus(), 500);
       });
@@ -903,6 +988,13 @@ function renderShelf(){
     row.appendChild(board);
     frame.appendChild(row);
   }
+}
+
+function renderShelf(){
+  const readBooks = books.filter(b => b.shelf !== 'tbr');
+  const tbrBooks = books.filter(b => b.shelf === 'tbr');
+  renderShelfInto('shelfFrame', readBooks, "Your shelf is empty. Add the first book you've read below.", 'read');
+  renderShelfInto('tbrFrame', tbrBooks, 'Your TBR pile is empty. Add a book you plan to read below.', 'tbr');
   renderStats();
 }
 
@@ -924,6 +1016,9 @@ function openModal(id){
   renderModalStars(book.rating);
   document.getElementById('saveHint').textContent = '';
   document.getElementById('modalDelete').style.display = isOwnerSignedIn ? '' : 'none';
+  const shelfBtn = document.getElementById('modalShelfBtn');
+  shelfBtn.textContent = book.shelf === 'tbr' ? 'Mark as read' : 'Move to TBR';
+  shelfBtn.style.display = isOwnerSignedIn ? '' : 'none';
   document.getElementById('modalOverlay').classList.add('open');
 }
 
@@ -1035,6 +1130,31 @@ function initEvents(){
     }
   });
 
+  document.getElementById('modalShelfBtn').addEventListener('click', async () => {
+    if(!activeId || !isOwner()) return;
+    const book = books.find(b => b.id === activeId);
+    if(!book) return;
+    const previous = book.shelf;
+    book.shelf = book.shelf === 'tbr' ? 'read' : 'tbr';
+    try{
+      await saveBook(book);
+      renderShelf();
+      document.getElementById('modalShelfBtn').textContent = book.shelf === 'tbr' ? 'Mark as read' : 'Move to TBR';
+      showToast(book.shelf === 'tbr' ? 'Moved to your TBR pile' : 'Marked as read');
+    }catch(err){
+      book.shelf = previous;
+      showToast('Could not move this book');
+      console.error(err);
+    }
+  });
+
+  const shelfToggleEl = document.getElementById('shelfToggle');
+  if(shelfToggleEl){
+    Array.from(shelfToggleEl.children).forEach(btn => {
+      btn.addEventListener('click', () => setShelfToggle(btn.dataset.value));
+    });
+  }
+
   document.getElementById('addForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const titleInput = document.getElementById('fTitle');
@@ -1051,11 +1171,14 @@ function initEvents(){
     const cover = document.getElementById('fCover').value.trim();
     const rating = parseInt(document.getElementById('ratingPicker').dataset.rating || '0', 10);
 
+    const chosenShelf = document.getElementById('shelfToggle').dataset.shelf === 'tbr' ? 'tbr' : 'read';
+
     const newBook = {
       id: 'book-' + Date.now(),
       title, author, rating, notes,
       color: books.length % PALETTE.length,
-      cover: cover || null
+      cover: cover || null,
+      shelf: chosenShelf
     };
     if(!isOwner()){
       showToast('Please sign in as the owner first');
@@ -1075,8 +1198,10 @@ function initEvents(){
     document.getElementById('addForm').reset();
     document.getElementById('ratingPicker').dataset.rating = 0;
     Array.from(document.getElementById('ratingPicker').children).forEach(el => el.classList.remove('filled'));
-    showToast('"' + title + '" added to your shelf');
-    document.getElementById('shelf').scrollIntoView({behavior:'smooth', block:'end'});
+    setShelfToggle('read');
+    showToast('"' + title + '" added to your ' + (chosenShelf === 'tbr' ? 'TBR pile' : 'shelf'));
+    const targetFrame = chosenShelf === 'tbr' ? document.getElementById('tbrFrame') : document.getElementById('shelfFrame');
+    targetFrame.scrollIntoView({behavior:'smooth', block:'center'});
   });
 
   window.addEventListener('scroll', () => {
