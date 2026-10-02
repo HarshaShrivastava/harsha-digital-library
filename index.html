@@ -718,6 +718,16 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
+// Guards against a misconfigured/unreachable Firestore (e.g. the
+// firebaseConfig placeholders haven't been filled in yet) hanging the
+// page forever instead of falling back to the built-in book list.
+function withTimeout(promise, ms){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore request timed out')), ms))
+  ]);
+}
+
 // No login system: every visitor has full access, so these are
 // always "on". Kept as named values/functions only because other
 // parts of the UI code check them before showing edit/delete controls.
@@ -726,7 +736,10 @@ function isOwner(){ return true; }
 
 async function loadBooks(){
   try{
-    const snapshot = await db.collection('books').orderBy('created_at', 'asc').get();
+    const snapshot = await withTimeout(
+      db.collection('books').orderBy('created_at', 'asc').get(),
+      6000
+    );
 
     if(!snapshot.empty){
       books = snapshot.docs.map(doc => {
@@ -1196,6 +1209,12 @@ function initEvents(){
 (async function init(){
   initRatingPicker();
   initEvents();
+
+  // Show the shelf instantly using the built-in book list so it's never
+  // blank/empty, then quietly try to upgrade to the live shared copy.
+  books = buildSeedBooks();
+  renderShelf();
+
   await loadBooks();
   renderShelf();
 })();
