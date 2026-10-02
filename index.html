@@ -715,8 +715,17 @@ const firebaseConfig = {
   messagingSenderId: "YOUR_SENDER_ID",
   appId: "YOUR_APP_ID"
 };
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+// `db` stays null if Firebase fails to load/initialize (e.g. the CDN
+// script was blocked, or firebaseConfig above still has placeholder
+// values) so the rest of the page can detect that and fall back to the
+// built-in book list instead of crashing before it ever renders.
+let db = null;
+try{
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+}catch(e){
+  console.error('Firebase failed to initialize — running in offline/built-in mode:', e);
+}
 
 // Guards against a misconfigured/unreachable Firestore (e.g. the
 // firebaseConfig placeholders haven't been filled in yet) hanging the
@@ -735,6 +744,15 @@ const isOwnerSignedIn = true;
 function isOwner(){ return true; }
 
 async function loadBooks(){
+  if(!db){
+    // Firebase never initialized — just keep the built-in shelf.
+    books = buildSeedBooks();
+    try{
+      const local = localStorage.getItem(STORAGE_KEY);
+      if(local) books = JSON.parse(local);
+    }catch(_){}
+    return;
+  }
   try{
     const snapshot = await withTimeout(
       db.collection('books').orderBy('created_at', 'asc').get(),
@@ -775,6 +793,7 @@ async function loadBooks(){
 }
 
 async function seedSharedLibrary(){
+  if(!db) return;
   try{
     const local = localStorage.getItem(STORAGE_KEY);
     let seedBooks = buildSeedBooks();
@@ -810,6 +829,7 @@ async function seedSharedLibrary(){
 }
 
 async function saveBook(book){
+  if(!db) throw new Error('Library database is not set up yet — see the firebaseConfig comment near the top of the script.');
   const ref = db.collection('books').doc(String(book.id));
   const existing = await ref.get();
   const payload = {
@@ -830,6 +850,7 @@ async function saveBook(book){
 }
 
 async function deleteBook(id){
+  if(!db) throw new Error('Library database is not set up yet — see the firebaseConfig comment near the top of the script.');
   await db.collection('books').doc(String(id)).delete();
 }
 
