@@ -401,12 +401,10 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
 .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
 
 
-/* Supabase owner controls */
+/* Firebase owner controls */
 .auth-area{display:flex;align-items:center;gap:10px;margin-left:14px}
 .auth-btn{border:1px solid rgba(224,188,126,.45);background:transparent;color:var(--parchment-soft);padding:8px 13px;border-radius:999px;font:600 12px Manrope,sans-serif;cursor:pointer}
 .auth-btn:hover{background:rgba(224,188,126,.12)}
-.auth-status{font-size:11px;color:var(--gold);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.owner-only{display:none}
 .login-overlay{position:fixed;inset:0;background:rgba(24,14,10,.78);z-index:500;align-items:center;justify-content:center;padding:20px}
 .login-overlay.open{display:flex}
 .login-card{width:min(430px,100%);background:var(--parchment);color:var(--espresso);padding:32px;border-radius:10px;box-shadow:0 25px 80px rgba(0,0,0,.45)}
@@ -430,10 +428,6 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
     <a href="#shelf">Bookshelf</a>
     <a href="#add">Add a book</a>
     <a href="#corner">My corner</a>
-    <div class="auth-area">
-      <span class="auth-status" id="authStatus">Public view</span>
-      <button class="auth-btn" id="authBtn" type="button">Owner login</button>
-    </div>
   </div>
 </nav>
 
@@ -482,18 +476,6 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
 </section>
 
 <section class="add-section" id="add">
-  <div id="ownerPrompt" style="
-  margin: 0 0 18px;
-  padding: 12px 16px;
-  border: 1px solid rgba(224,188,126,.35);
-  border-radius: 6px;
-  background: rgba(255,255,255,.05);
-  font-size: 13px;
-  line-height: 1.5;
-">
-  <strong>Owner access:</strong>
-  Please log in using the <em>Owner Login</em> button above to add, edit, or delete books.
-</div>
   <div class="section-head">
     <p class="kicker">Next up</p>
     <h2>Add a new book</h2>
@@ -627,27 +609,10 @@ footer .brand{ font-family:var(--font-display); color:var(--brass-light); font-s
 </div>
 
 
-<div class="login-overlay" id="loginOverlay" style="display:none">
-  <div class="login-card">
-    <button class="login-close" id="loginClose" type="button" aria-label="Close">&times;</button>
-    <h3>Owner login</h3>
-    <p>Visitors can browse the library. Sign in here to add, rate, edit notes, or remove books.</p>
-    <form id="loginForm">
-      <label for="loginEmail">Email</label>
-      <input id="loginEmail" type="email" autocomplete="username" required>
-      <label for="loginPassword">Password</label>
-      <input id="loginPassword" type="password" autocomplete="current-password" required>
-      <div class="login-actions">
-        <button class="btn" type="submit">Sign in</button>
-        <span class="login-error" id="loginError"></span>
-      </div>
-    </form>
-  </div>
-</div>
-
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 const STORAGE_KEY = 'harsha-library-books';
 const PALETTE = [
@@ -726,49 +691,67 @@ const BUBBLE_LINES = [
 ];
 
 
-const SUPABASE_URL = 'https://yowxqhxdtqamnxxrdrua.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_GxRAhVd_ZYbeZZp30j5tUQ_MaH7RmYn';
-const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+// ---- Firebase setup ----
+// 1. Go to https://console.firebase.google.com -> Add project (free "Spark" plan).
+// 2. Build > Firestore Database > Create database (start in "production mode").
+// 3. Firestore > Rules, replace with the rules below, then click Publish.
+//    This is a fully public, no-login library: anyone who opens the page
+//    can add books and rate them, so both read AND write are open to all.
+//      rules_version = '2';
+//      service cloud.firestore {
+//        match /databases/{database}/documents {
+//          match /books/{bookId} {
+//            allow read, write: if true;
+//          }
+//        }
+//      }
+// 4. Project settings (gear icon) > General > "Your apps" > Add app (</> web icon)
+//    > copy the firebaseConfig object it gives you and paste it below.
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 
-let currentSession = null;
-let isOwnerSignedIn = false;
-
-function isOwner(){
-  return !!currentSession && currentSession.user;
-}
+// No login system: every visitor has full access, so these are
+// always "on". Kept as named values/functions only because other
+// parts of the UI code check them before showing edit/delete controls.
+const isOwnerSignedIn = true;
+function isOwner(){ return true; }
 
 async function loadBooks(){
   try{
-    const { data, error } = await supabaseClient
-      .from('books')
-      .select('*')
-      .order('created_at', { ascending: true });
+    const snapshot = await db.collection('books').orderBy('created_at', 'asc').get();
 
-    if(error) throw error;
-
-    if(data && data.length){
-      books = data.map(b => ({
-        id: b.id,
-        title: b.title || '',
-        author: b.author || '',
-        rating: Number(b.rating || 0),
-        notes: b.notes || '',
-        color: Number(b.color || 0),
-        cover: b.cover || null,
-        shelf: b.shelf === 'tbr' ? 'tbr' : 'read'
-      }));
+    if(!snapshot.empty){
+      books = snapshot.docs.map(doc => {
+        const b = doc.data();
+        return {
+          id: doc.id,
+          title: b.title || '',
+          author: b.author || '',
+          rating: Number(b.rating || 0),
+          notes: b.notes || '',
+          color: Number(b.color || 0),
+          cover: b.cover || null,
+          shelf: b.shelf === 'tbr' ? 'tbr' : 'read'
+        };
+      });
       return;
     }
 
-    // Keep the original shelf visible for everyone until the owner signs in.
+    // Nothing in Firestore yet — create the initial shared shelf.
+    // Anyone's first visit can trigger this; after that the collection
+    // is non-empty so it only ever runs once.
     books = buildSeedBooks();
-
-    // Only the authenticated owner may create the initial shared copy.
-    if(isOwner()){
-      await seedSharedLibrary();
-    }
+    await seedSharedLibrary();
   }catch(e){
-    console.error('Could not load library from Supabase:', e);
+    console.error('Could not load library from Firestore:', e);
     // Graceful fallback keeps the original page usable if the network is unavailable.
     books = buildSeedBooks();
     try{
@@ -791,19 +774,21 @@ async function seedSharedLibrary(){
       }catch(_){}
     }
 
-    const rows = seedBooks.map(b => ({
-      id: b.id,
-      title: b.title,
-      author: b.author || '',
-      rating: Number(b.rating || 0),
-      notes: b.notes || '',
-      color: Number(b.color || 0),
-      cover: b.cover || null,
-      shelf: b.shelf === 'tbr' ? 'tbr' : 'read'
-    }));
-
-    const { error } = await supabaseClient.from('books').upsert(rows, { onConflict:'id' });
-    if(error) throw error;
+    const batch = db.batch();
+    seedBooks.forEach(b => {
+      const ref = db.collection('books').doc(String(b.id));
+      batch.set(ref, {
+        title: b.title,
+        author: b.author || '',
+        rating: Number(b.rating || 0),
+        notes: b.notes || '',
+        color: Number(b.color || 0),
+        cover: b.cover || null,
+        shelf: b.shelf === 'tbr' ? 'tbr' : 'read',
+        created_at: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+    await batch.commit();
 
     books = seedBooks;
   }catch(e){
@@ -812,9 +797,9 @@ async function seedSharedLibrary(){
 }
 
 async function saveBook(book){
-  if(!isOwner()) throw new Error('Owner login required.');
-  const { error } = await supabaseClient.from('books').upsert({
-    id: book.id,
+  const ref = db.collection('books').doc(String(book.id));
+  const existing = await ref.get();
+  const payload = {
     title: book.title,
     author: book.author || '',
     rating: Number(book.rating || 0),
@@ -822,37 +807,17 @@ async function saveBook(book){
     color: Number(book.color || 0),
     cover: book.cover || null,
     shelf: book.shelf === 'tbr' ? 'tbr' : 'read'
-  }, { onConflict:'id' });
-  if(error) throw error;
+  };
+  // Only stamp created_at the first time this doc is written, so ordering
+  // stays stable on later edits (merge:true won't touch fields we omit).
+  if(!existing.exists){
+    payload.created_at = firebase.firestore.FieldValue.serverTimestamp();
+  }
+  await ref.set(payload, { merge: true });
 }
 
 async function deleteBook(id){
-  if(!isOwner()) throw new Error('Owner login required.');
-  const { error } = await supabaseClient.from('books').delete().eq('id', id);
-  if(error) throw error;
-}
-
-function setOwnerUI(signedIn){
-  isOwnerSignedIn = signedIn;
-  document.querySelectorAll('.owner-only').forEach(el => {
-    el.style.display = signedIn ? '' : 'none';
-  });
-
-  const status = document.getElementById('authStatus');
-  const btn = document.getElementById('authBtn');
-  if(signedIn){
-    status.textContent = currentSession?.user?.email || 'Owner';
-    btn.textContent = 'Log out';
-  }else{
-    status.textContent = 'Public view';
-    btn.textContent = 'Owner login';
-  }
-
-  const notes = document.getElementById('modalNotes');
-  if(notes){
-    notes.readOnly = !signedIn;
-    notes.style.opacity = signedIn ? '1' : '.78';
-  }
+  await db.collection('books').doc(String(id)).delete();
 }
 
 
@@ -1228,78 +1193,9 @@ function initEvents(){
 }
 
 
-function openLogin(){
-  const overlay = document.getElementById('loginOverlay');
-  overlay.style.display = 'flex';
-  setTimeout(() => document.getElementById('loginEmail').focus(), 50);
-}
-function closeLogin(){
-  document.getElementById('loginOverlay').style.display = 'none';
-  document.getElementById('loginError').textContent = '';
-}
-
-async function handleAuthState(session){
-  currentSession = session;
-  setOwnerUI(!!session);
-
-  if(session){
-    // If the database is empty, seed it once after the owner logs in.
-    const { data, error } = await supabaseClient.from('books').select('id').limit(1);
-    if(!error && (!data || data.length === 0)){
-      await seedSharedLibrary();
-      renderShelf();
-    }else{
-      await loadBooks();
-      renderShelf();
-    }
-  }
-}
-
-function initAuth(){
-  document.getElementById('authBtn').addEventListener('click', async () => {
-    if(currentSession){
-      await supabaseClient.auth.signOut();
-    }else{
-      openLogin();
-    }
-  });
-
-  document.getElementById('loginClose').addEventListener('click', closeLogin);
-  document.getElementById('loginOverlay').addEventListener('click', (e) => {
-    if(e.target.id === 'loginOverlay') closeLogin();
-  });
-
-  document.getElementById('loginForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('loginEmail').value.trim();
-    const password = document.getElementById('loginPassword').value;
-    const errorEl = document.getElementById('loginError');
-    errorEl.textContent = 'Signing in…';
-
-    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if(error){
-      errorEl.textContent = error.message || 'Sign in failed.';
-      return;
-    }
-
-    closeLogin();
-    showToast('Welcome back');
-  });
-
-  supabaseClient.auth.onAuthStateChange((_event, session) => {
-    handleAuthState(session);
-  });
-}
-
 (async function init(){
   initRatingPicker();
   initEvents();
-  initAuth();
-
-  const { data } = await supabaseClient.auth.getSession();
-  currentSession = data.session;
-  setOwnerUI(!!currentSession);
-
   await loadBooks();
   renderShelf();
 })();
